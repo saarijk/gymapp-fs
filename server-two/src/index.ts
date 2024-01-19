@@ -1,98 +1,33 @@
-import mongoose, { ObjectId } from "mongoose";
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
 import { ApolloServer } from "@apollo/server";
 import { expressMiddleware } from "@apollo/server/express4";
-import { ApolloServerPluginDrainHttpServer } from "@apollo/server/plugin/drainHttpServer";
-import { GraphQLError } from "graphql";
-import express from "express";
-import http from "http";
-import cors from "cors";
-import { User as UserModel } from "./models/user.js";
-import Users from "./dataSources/users.js";
-import pkg from "body-parser";
-import { UserDocument } from "./types.js";
-const { json } = pkg;
 
-await mongoose.connect("mongodb://127.0.0.1:27017/ragnemt");
-
+dotenv.config();
 const app = express();
-// Our httpServer handles incoming requests to our Express app.
-// Below, we tell Apollo Server to "drain" this httpServer,
-// enabling our servers to shut down gracefully.
-const httpServer = http.createServer(app);
+const port = process.env.PORT || 4000;
 
-const typeDefs = `#graphql
-  type User {
-    _id: ID!
-    username: String
-    password: String
-    email: String
-  }
-  type Query {
-    users: [User]
-    user(_id: ID!): User
-  }
-  type Mutation {
-    addUser(username: String, password: String, email: String): User
-  }
-`;
+const bootstrapServer = async () => {
+  const server = new ApolloServer({
+    typeDefs,
+    resolvers,
+  });
+  await server.start();
 
-const resolvers = {
-  Query: {
-    users: (_parent: any, _args: any, { dataSourses }) => {
-      return dataSourses.users.getUsers();
-    },
-    user: (_parent: any, { _id }, { dataSourses }) => {
-      return dataSourses.users.getUser(_id).then((res: UserDocument) => {
-        if (!res) {
-          throw new GraphQLError(`User with User Id ${_id} does not exist.`);
-        }
-        return res;
-      });
-    },
-  },
-  Mutation: {
-    addUser: (_parent: any, { username, password, email }, { dataSourses }) => {
-      return dataSourses.users
-        .addUser(username, password, email)
-        .then((res: { insertedIds: ObjectId[] }) => ({
-          _id: res.insertedIds[0],
-          username,
-          password,
-          email,
-        }));
-    },
-  },
+  app.use(cors());
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  app.use("graphql", expressMiddleware(server));
+
+  app.get("/", (req, res) => {
+    res.send("Hello there!");
+  });
+
+  app.listen(port, () => {
+    console.log(`Express ready at http://localhost:${port}`);
+    console.log(`Graphql ready at http://localhost:${port}/graphql`);
+  });
 };
 
-interface MyContext {
-  dataSources?: {
-    users: Users;
-  };
-}
-
-const server = new ApolloServer<MyContext>({
-  typeDefs,
-  resolvers,
-  plugins: [
-    // Proper shutdown for the HTTP server.
-    ApolloServerPluginDrainHttpServer({ httpServer }),
-  ],
-});
-await server.start();
-
-app.use(
-  cors<cors.CorsRequest>(),
-  json(),
-  expressMiddleware(server, {
-    context: async ({ req }) => ({
-      token: req.headers.token,
-      dataSourses: {
-        users: new Users(await UserModel.createCollection()),
-      },
-    }),
-  })
-);
-
-app.listen({ port: 4000 }, () =>
-  console.log(`🚀 Server ready at http://localhost:4000`)
-);
+bootstrapServer();
